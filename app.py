@@ -259,7 +259,7 @@ elif option == "Volatility Clusters":
                 st.pyplot(fig2)
 
 else:  # Momentum Scores
-    tickers_default = ["QQQ", "SPY", "EFA", "EEM", "TLT", "GLD", "USO", "SLV", "VNQ]
+    tickers_default = ["QQQ", "SPY", "EFA", "EEM", "TLT", "GLD", "USO", "SLV", "VNQ"]
     tickers = st.sidebar.multiselect("Sélectionnez les tickers", options=tickers_default, default=tickers_default)
     years = st.sidebar.number_input("Nombre d'années", min_value=1, max_value=10, value=1, step=1)
     if st.sidebar.button("Lancer l'analyse"):
