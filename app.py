@@ -1,5 +1,5 @@
 import streamlit as st
-import pandas as pd
+import pandas aspd
 import numpy as np
 import yfinance as yf
 import matplotlib.pyplot as plt
@@ -25,9 +25,9 @@ def set_bloomberg_style():
     """Applique un style de graphique proche des terminaux Bloomberg."""
     plt.style.use('dark_background')
     rcParams.update({
-        'figure.facecolor': '#1e1e1e',        # fond de la figure
-        'axes.facecolor': '#1e1e1e',          # fond des axes
-        'axes.edgecolor': '#4d4d4d',           # bordure des axes
+        'figure.facecolor': '#1e1e1e',
+        'axes.facecolor': '#1e1e1e',
+        'axes.edgecolor': '#4d4d4d',
         'axes.labelcolor': 'white',
         'axes.labelsize': 12,
         'axes.grid': True,
@@ -57,6 +57,8 @@ def load_data(ticker):
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.droplevel(1)
     df.columns = [col.lower() for col in df.columns]
+    # Calcul du prix moyen (OHLC)
+    df['avg'] = (df['open'] + df['high'] + df['low'] + df['close']) / 4
     return df
 
 # ------------------------------------------------------------
@@ -73,15 +75,15 @@ def plot_trend_clusters(ticker, n_clusters=4, years=1):
         st.error(f"Colonnes manquantes pour {ticker}")
         return None
 
-    # Calcul des indicateurs de tendance
+    # Calcul des indicateurs de tendance sur le prix moyen
     windows = [31]
     for w in windows:
-        df[f'vol_rsi_{w}'] = ta.momentum.RSIIndicator(df['close'], window=w).rsi()
+        df[f'vol_rsi_{w}'] = ta.momentum.RSIIndicator(df['avg'], window=w).rsi()
         df[f"vol_stoch_{w}"] = ta.momentum.StochasticOscillator(
-            high=df["high"], low=df["low"], close=df["close"], window=w
+            high=df["high"], low=df["low"], close=df["avg"], window=w
         ).stoch_signal()
         df[f"vol_willr_{w}"] = ta.momentum.WilliamsRIndicator(
-            df["high"], df["low"], df["close"], lbp=w
+            df["high"], df["low"], df["avg"], lbp=w
         ).williams_r()
 
     df.dropna(inplace=True)
@@ -104,29 +106,26 @@ def plot_trend_clusters(ticker, n_clusters=4, years=1):
     start_idx = len(df) - (years * 252)
     plot_df = df.iloc[start_idx:].copy()
 
-    # ---------- Figure 1 : Prix et clusters ----------
+    # ---------- Figure 1 : Prix moyen et clusters ----------
     fig, ax = plt.subplots(figsize=(16, 7), dpi=300)
     cmap = plt.cm.get_cmap("tab10", n_clusters)
     cluster_colors = [cmap(i) for i in range(n_clusters)]
 
-    # Ligne du prix de clôture
-    ax.plot(plot_df.index, plot_df["close"], color="#F0F0F0", linewidth=1.6, alpha=0.9, label="Close Price")
+    ax.plot(plot_df.index, plot_df["avg"], color="#F0F0F0", linewidth=1.6, alpha=0.9, label="Avg Price (OHLC)")
 
-    # Nuages de points pour les clusters (taille plus grosse)
     for cluster in range(n_clusters):
         cluster_data = plot_df[plot_df["volatility_cluster"] == cluster]
-        ax.scatter(cluster_data.index, cluster_data["close"],
+        ax.scatter(cluster_data.index, cluster_data["avg"],
                    s=25, color=cluster_colors[cluster], alpha=0.9, label=f"Cluster {cluster}")
 
-    # Moyennes mobiles
-    ax.plot(plot_df.index, plot_df["close"].rolling(50).mean(),
-            linestyle="--", linewidth=1.5, color="#E69F00", alpha=0.9, label="50D MA")
-    ax.plot(plot_df.index, plot_df["close"].rolling(200).mean(),
-            linestyle="--", linewidth=1.5, color="#56B4E9", alpha=0.9, label="200D MA")
+    ax.plot(plot_df.index, plot_df["avg"].rolling(50).mean(),
+            linestyle="--", linewidth=1.5, color="#E69F00", alpha=0.9, label="50D MA (avg)")
+    ax.plot(plot_df.index, plot_df["avg"].rolling(200).mean(),
+            linestyle="--", linewidth=1.5, color="#56B4E9", alpha=0.9, label="200D MA (avg)")
 
     ax.set_title(f"{ticker} – Trend Regimes (BayesianGaussianMixture)", fontsize=16, weight="bold", pad=15)
     ax.set_xlabel("Date", fontsize=12)
-    ax.set_ylabel("Close Price (log scale)", fontsize=12)
+    ax.set_ylabel("Average Price (log scale)", fontsize=12)
     ax.set_yscale("log")
     ax.xaxis.set_major_locator(mdates.AutoDateLocator())
     ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax.xaxis.get_major_locator()))
@@ -135,7 +134,6 @@ def plot_trend_clusters(ticker, n_clusters=4, years=1):
 
     # ---------- Figure 2 : Composante PCA ----------
     fig2, ax2 = plt.subplots(figsize=(16, 4), dpi=300)
-    # Remplir la zone positive en vert et négative en rouge (style Bloomberg)
     ax2.fill_between(plot_df.index, 0, plot_df["volatility_pca"],
                      where=plot_df["volatility_pca"] >= 0,
                      color='#00FF00', alpha=0.3, label='Positive')
@@ -165,7 +163,7 @@ def plot_volatility_clusters(ticker, n_clusters=4, years=1):
         st.error(f"Colonnes manquantes pour {ticker}")
         return None
 
-    # Calcul des mesures de volatilité
+    # Calcul des mesures de volatilité (inchangé, utilise OHLC)
     for w in [5, 10, 20, 50, 100]:
         df[f'vol_close_to_close_{w}'] = fe.volatility.close_to_close_volatility(df, window_size=w)
         df[f'vol_parkinson_{w}'] = fe.volatility.parkinson_volatility(df, high_col='high', low_col='low', window_size=w)
@@ -193,26 +191,26 @@ def plot_volatility_clusters(ticker, n_clusters=4, years=1):
     start_idx = len(df) - (years * 252)
     plot_df = df.iloc[start_idx:].copy()
 
-    # ---------- Figure 1 : Prix et clusters ----------
+    # ---------- Figure 1 : Prix moyen et clusters ----------
     fig, ax = plt.subplots(figsize=(16, 7), dpi=300)
     cmap = plt.cm.get_cmap("tab10", n_clusters)
     cluster_colors = [cmap(i) for i in range(n_clusters)]
 
-    ax.plot(plot_df.index, plot_df["close"], color="#F0F0F0", linewidth=1.6, alpha=0.9, label="Close Price")
+    ax.plot(plot_df.index, plot_df["avg"], color="#F0F0F0", linewidth=1.6, alpha=0.9, label="Avg Price (OHLC)")
 
     for cluster in range(n_clusters):
         cluster_data = plot_df[plot_df["volatility_cluster"] == cluster]
-        ax.scatter(cluster_data.index, cluster_data["close"],
+        ax.scatter(cluster_data.index, cluster_data["avg"],
                    s=25, color=cluster_colors[cluster], alpha=0.9, label=f"Cluster {cluster}")
 
-    ax.plot(plot_df.index, plot_df["close"].rolling(50).mean(),
-            linestyle="--", linewidth=1.5, color="#E69F00", alpha=0.9, label="50D MA")
-    ax.plot(plot_df.index, plot_df["close"].rolling(200).mean(),
-            linestyle="--", linewidth=1.5, color="#56B4E9", alpha=0.9, label="200D MA")
+    ax.plot(plot_df.index, plot_df["avg"].rolling(50).mean(),
+            linestyle="--", linewidth=1.5, color="#E69F00", alpha=0.9, label="50D MA (avg)")
+    ax.plot(plot_df.index, plot_df["avg"].rolling(200).mean(),
+            linestyle="--", linewidth=1.5, color="#56B4E9", alpha=0.9, label="200D MA (avg)")
 
     ax.set_title(f"{ticker} – Volatility Regimes (K-Means)", fontsize=16, weight="bold", pad=15)
     ax.set_xlabel("Date", fontsize=12)
-    ax.set_ylabel("Close Price (log scale)", fontsize=12)
+    ax.set_ylabel("Average Price (log scale)", fontsize=12)
     ax.set_yscale("log")
     ax.xaxis.set_major_locator(mdates.AutoDateLocator())
     ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax.xaxis.get_major_locator()))
@@ -249,9 +247,10 @@ def plot_momentum_scores(tickers, years=1):
             continue
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
-        # Calcul des performances sur différentes périodes
+        # Calcul du prix moyen (OHLC) et des scores
+        df['avg'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
         for t in [20, 60, 120, 180, 240]:
-            df[f"Perf_{t}d"] = df["Close"].pct_change(t)
+            df[f"Perf_{t}d"] = df["avg"].pct_change(t)
         df["Score"] = df[[f"Perf_{t}d" for t in [20,60,120,180,240]]].mean(axis=1)
         data[ticker] = df[["Score"]].dropna()
 
@@ -271,13 +270,12 @@ def plot_momentum_scores(tickers, years=1):
         start_idx = 0
     plot_df = df_concat.iloc[start_idx:]
 
-    # Utiliser une palette de couleurs qualitative
     colors = plt.cm.Set1(np.linspace(0, 1, len(plot_df.columns)))
     fig, ax = plt.subplots(figsize=(20, 10), dpi=600)
     for i, col in enumerate(plot_df.columns):
         ax.plot(plot_df.index, plot_df[col], color=colors[i], linewidth=2, alpha=0.8, label=col)
     ax.legend(loc='upper left', frameon=True, ncol=2, fontsize=10)
-    ax.set_title("Momentum Score for Different Asset Classes", fontsize=16, weight="bold", pad=15)
+    ax.set_title("Momentum Score (based on Avg Price) for Different Asset Classes", fontsize=16, weight="bold", pad=15)
     ax.set_xlabel("Date", fontsize=12)
     ax.set_ylabel("Momentum Score", fontsize=12)
     ax.grid(True, linestyle="--", alpha=0.4)
