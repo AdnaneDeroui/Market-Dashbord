@@ -4,6 +4,7 @@ import numpy as np
 import yfinance as yf
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from matplotlib import rcParams
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import KernelPCA
 from sklearn.cluster import KMeans
@@ -17,20 +18,52 @@ warnings.filterwarnings("ignore")
 st.set_page_config(page_title="Market Analysis Dashboard", layout="wide")
 st.title("📈 Market Analysis Dashboard")
 
-# Mise en cache des données pour éviter de télécharger à chaque interaction
-@st.cache_data(ttl=3600)  # cache valide 1 heure
+# ------------------------------------------------------------
+# Style Bloomberg pour les graphiques
+# ------------------------------------------------------------
+def set_bloomberg_style():
+    """Applique un style de graphique proche des terminaux Bloomberg."""
+    plt.style.use('dark_background')
+    rcParams.update({
+        'figure.facecolor': '#1e1e1e',        # fond de la figure
+        'axes.facecolor': '#1e1e1e',          # fond des axes
+        'axes.edgecolor': '#4d4d4d',           # bordure des axes
+        'axes.labelcolor': 'white',
+        'axes.labelsize': 12,
+        'axes.grid': True,
+        'grid.color': '#4d4d4d',
+        'grid.linestyle': '--',
+        'grid.alpha': 0.4,
+        'xtick.color': 'white',
+        'ytick.color': 'white',
+        'legend.fontsize': 10,
+        'legend.frameon': True,
+        'legend.framealpha': 0.8,
+        'legend.facecolor': '#2b2b2b',
+        'legend.edgecolor': '#4d4d4d',
+        'text.color': 'white',
+        'font.family': 'sans-serif',
+        'font.sans-serif': ['Arial', 'Helvetica', 'DejaVu Sans'],
+    })
+
+# ------------------------------------------------------------
+# Mise en cache des données
+# ------------------------------------------------------------
+@st.cache_data(ttl=3600)
 def load_data(ticker):
     df = yf.download(ticker, interval='1d', period='max', progress=False)
     if df.empty:
         return None
-    # Nettoyage des colonnes
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.droplevel(1)
     df.columns = [col.lower() for col in df.columns]
     return df
 
-# Fonctions d'analyse (adaptées pour retourner les figures)
+# ------------------------------------------------------------
+# Fonctions d'analyse avec graphiques améliorés
+# ------------------------------------------------------------
 def plot_trend_clusters(ticker, n_clusters=4, years=1):
+    set_bloomberg_style()
     df = load_data(ticker)
     if df is None:
         st.error(f"Aucune donnée trouvée pour {ticker}")
@@ -64,7 +97,6 @@ def plot_trend_clusters(ticker, n_clusters=4, years=1):
     pca.fit(scaler.transform(train_df[vol_features]))
     df['volatility_pca'] = pca.transform(scaled_features)
 
-    # Clustering avec BayesianGaussianMixture
     bgm = BayesianGaussianMixture(n_components=n_clusters, random_state=42)
     df['volatility_cluster'] = bgm.fit_predict(df[['volatility_pca']])
 
@@ -72,22 +104,25 @@ def plot_trend_clusters(ticker, n_clusters=4, years=1):
     start_idx = len(df) - (years * 252)
     plot_df = df.iloc[start_idx:].copy()
 
-    # Création de la figure
+    # ---------- Figure 1 : Prix et clusters ----------
     fig, ax = plt.subplots(figsize=(16, 7), dpi=300)
     cmap = plt.cm.get_cmap("tab10", n_clusters)
     cluster_colors = [cmap(i) for i in range(n_clusters)]
 
-    ax.plot(plot_df.index, plot_df["close"], color="black", linewidth=1.4, alpha=0.6, label="Close Price")
+    # Ligne du prix de clôture
+    ax.plot(plot_df.index, plot_df["close"], color="#F0F0F0", linewidth=1.6, alpha=0.9, label="Close Price")
 
+    # Nuages de points pour les clusters (taille plus grosse)
     for cluster in range(n_clusters):
         cluster_data = plot_df[plot_df["volatility_cluster"] == cluster]
         ax.scatter(cluster_data.index, cluster_data["close"],
-                   s=18, color=cluster_colors[cluster], alpha=0.85, label=f"Cluster {cluster}")
+                   s=25, color=cluster_colors[cluster], alpha=0.9, label=f"Cluster {cluster}")
 
+    # Moyennes mobiles
     ax.plot(plot_df.index, plot_df["close"].rolling(50).mean(),
-            linestyle="--", linewidth=1.2, color="#E69F00", alpha=0.9, label="50D MA")
+            linestyle="--", linewidth=1.5, color="#E69F00", alpha=0.9, label="50D MA")
     ax.plot(plot_df.index, plot_df["close"].rolling(200).mean(),
-            linestyle="--", linewidth=1.2, color="#0072B2", alpha=0.9, label="200D MA")
+            linestyle="--", linewidth=1.5, color="#56B4E9", alpha=0.9, label="200D MA")
 
     ax.set_title(f"{ticker} – Trend Regimes (BayesianGaussianMixture)", fontsize=16, weight="bold", pad=15)
     ax.set_xlabel("Date", fontsize=12)
@@ -95,25 +130,32 @@ def plot_trend_clusters(ticker, n_clusters=4, years=1):
     ax.set_yscale("log")
     ax.xaxis.set_major_locator(mdates.AutoDateLocator())
     ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax.xaxis.get_major_locator()))
-    ax.legend(frameon=True, fontsize=10)
-    ax.grid(True, linestyle="--", alpha=0.3)
+    ax.legend(loc='upper left', frameon=True)
     plt.tight_layout()
 
-    # Deuxième figure pour la composante PCA
+    # ---------- Figure 2 : Composante PCA ----------
     fig2, ax2 = plt.subplots(figsize=(16, 4), dpi=300)
-    ax2.plot(plot_df.index, plot_df["volatility_pca"], color="#2C3E50", linewidth=1.4)
-    ax2.axhline(0, linestyle="--", linewidth=1, color="gray", alpha=0.6)
+    # Remplir la zone positive en vert et négative en rouge (style Bloomberg)
+    ax2.fill_between(plot_df.index, 0, plot_df["volatility_pca"],
+                     where=plot_df["volatility_pca"] >= 0,
+                     color='#00FF00', alpha=0.3, label='Positive')
+    ax2.fill_between(plot_df.index, 0, plot_df["volatility_pca"],
+                     where=plot_df["volatility_pca"] < 0,
+                     color='#FF0000', alpha=0.3, label='Negative')
+    ax2.plot(plot_df.index, plot_df["volatility_pca"], color="#FFFFFF", linewidth=1.4, label='PCA')
+    ax2.axhline(0, linestyle="-", linewidth=0.8, color="gray", alpha=0.6)
     ax2.set_title(f"{ticker} – Trend PCA Component", fontsize=14, weight="bold", pad=12)
     ax2.set_xlabel("Date", fontsize=11)
     ax2.set_ylabel("Kernel PCA (1st Component)", fontsize=11)
     ax2.xaxis.set_major_locator(mdates.AutoDateLocator())
     ax2.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax2.xaxis.get_major_locator()))
-    ax2.grid(True, linestyle="--", alpha=0.3)
+    ax2.legend(loc='upper right', frameon=True)
     plt.tight_layout()
 
     return fig, fig2
 
 def plot_volatility_clusters(ticker, n_clusters=4, years=1):
+    set_bloomberg_style()
     df = load_data(ticker)
     if df is None:
         st.error(f"Aucune donnée trouvée pour {ticker}")
@@ -151,21 +193,22 @@ def plot_volatility_clusters(ticker, n_clusters=4, years=1):
     start_idx = len(df) - (years * 252)
     plot_df = df.iloc[start_idx:].copy()
 
+    # ---------- Figure 1 : Prix et clusters ----------
     fig, ax = plt.subplots(figsize=(16, 7), dpi=300)
     cmap = plt.cm.get_cmap("tab10", n_clusters)
     cluster_colors = [cmap(i) for i in range(n_clusters)]
 
-    ax.plot(plot_df.index, plot_df["close"], color="black", linewidth=1.4, alpha=0.6, label="Close Price")
+    ax.plot(plot_df.index, plot_df["close"], color="#F0F0F0", linewidth=1.6, alpha=0.9, label="Close Price")
 
     for cluster in range(n_clusters):
         cluster_data = plot_df[plot_df["volatility_cluster"] == cluster]
         ax.scatter(cluster_data.index, cluster_data["close"],
-                   s=18, color=cluster_colors[cluster], alpha=0.85, label=f"Cluster {cluster}")
+                   s=25, color=cluster_colors[cluster], alpha=0.9, label=f"Cluster {cluster}")
 
     ax.plot(plot_df.index, plot_df["close"].rolling(50).mean(),
-            linestyle="--", linewidth=1.2, color="#E69F00", alpha=0.9, label="50D MA")
+            linestyle="--", linewidth=1.5, color="#E69F00", alpha=0.9, label="50D MA")
     ax.plot(plot_df.index, plot_df["close"].rolling(200).mean(),
-            linestyle="--", linewidth=1.2, color="#0072B2", alpha=0.9, label="200D MA")
+            linestyle="--", linewidth=1.5, color="#56B4E9", alpha=0.9, label="200D MA")
 
     ax.set_title(f"{ticker} – Volatility Regimes (K-Means)", fontsize=16, weight="bold", pad=15)
     ax.set_xlabel("Date", fontsize=12)
@@ -173,24 +216,31 @@ def plot_volatility_clusters(ticker, n_clusters=4, years=1):
     ax.set_yscale("log")
     ax.xaxis.set_major_locator(mdates.AutoDateLocator())
     ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax.xaxis.get_major_locator()))
-    ax.legend(frameon=True, fontsize=10)
-    ax.grid(True, linestyle="--", alpha=0.3)
+    ax.legend(loc='upper left', frameon=True)
     plt.tight_layout()
 
+    # ---------- Figure 2 : Composante PCA ----------
     fig2, ax2 = plt.subplots(figsize=(16, 4), dpi=300)
-    ax2.plot(plot_df.index, plot_df["volatility_pca"], color="#2C3E50", linewidth=1.4)
-    ax2.axhline(0, linestyle="--", linewidth=1, color="gray", alpha=0.6)
+    ax2.fill_between(plot_df.index, 0, plot_df["volatility_pca"],
+                     where=plot_df["volatility_pca"] >= 0,
+                     color='#00FF00', alpha=0.3, label='Positive')
+    ax2.fill_between(plot_df.index, 0, plot_df["volatility_pca"],
+                     where=plot_df["volatility_pca"] < 0,
+                     color='#FF0000', alpha=0.3, label='Negative')
+    ax2.plot(plot_df.index, plot_df["volatility_pca"], color="#FFFFFF", linewidth=1.4, label='PCA')
+    ax2.axhline(0, linestyle="-", linewidth=0.8, color="gray", alpha=0.6)
     ax2.set_title(f"{ticker} – Volatility PCA Component", fontsize=14, weight="bold", pad=12)
     ax2.set_xlabel("Date", fontsize=11)
     ax2.set_ylabel("Kernel PCA (1st Component)", fontsize=11)
     ax2.xaxis.set_major_locator(mdates.AutoDateLocator())
     ax2.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax2.xaxis.get_major_locator()))
-    ax2.grid(True, linestyle="--", alpha=0.3)
+    ax2.legend(loc='upper right', frameon=True)
     plt.tight_layout()
 
     return fig, fig2
 
 def plot_momentum_scores(tickers, years=1):
+    set_bloomberg_style()
     data = {}
     for ticker in tickers:
         df = yf.download(ticker, period="max", interval="1d", progress=False)
@@ -219,15 +269,26 @@ def plot_momentum_scores(tickers, years=1):
     start_idx = len(df_concat) - years * 252
     if start_idx < 0:
         start_idx = 0
+    plot_df = df_concat.iloc[start_idx:]
+
+    # Utiliser une palette de couleurs qualitative
+    colors = plt.cm.Set1(np.linspace(0, 1, len(plot_df.columns)))
     fig, ax = plt.subplots(figsize=(20, 10), dpi=600)
-    df_concat.iloc[start_idx:].plot(ax=ax)
-    ax.legend(df_concat.iloc[start_idx:].columns, loc='upper left')
-    ax.set_title("Momentum Score for Different Asset Classes")
-    ax.grid()
+    for i, col in enumerate(plot_df.columns):
+        ax.plot(plot_df.index, plot_df[col], color=colors[i], linewidth=2, alpha=0.8, label=col)
+    ax.legend(loc='upper left', frameon=True, ncol=2, fontsize=10)
+    ax.set_title("Momentum Score for Different Asset Classes", fontsize=16, weight="bold", pad=15)
+    ax.set_xlabel("Date", fontsize=12)
+    ax.set_ylabel("Momentum Score", fontsize=12)
+    ax.grid(True, linestyle="--", alpha=0.4)
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax.xaxis.get_major_locator()))
     plt.tight_layout()
     return fig
 
-# Interface utilisateur
+# ------------------------------------------------------------
+# Interface utilisateur (inchangée)
+# ------------------------------------------------------------
 st.sidebar.header("Paramètres")
 option = st.sidebar.selectbox(
     "Choisissez une analyse",
