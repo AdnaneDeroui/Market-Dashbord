@@ -18,16 +18,18 @@ warnings.filterwarnings("ignore")
 # ============================================================
 
 st.set_page_config(
-    page_title="Professional Market Terminal",
+    page_title="Quant Market Terminal",
     layout="wide",
-    initial_sidebar_state="expanded"
 )
 
+st.title("📊 Quant Market Terminal")
+
 # ============================================================
-# GLOBAL STYLE (Bloomberg-like)
+# BLOOMBERG STYLE
 # ============================================================
 
 def set_terminal_style():
+
     plt.style.use("dark_background")
 
     rcParams.update({
@@ -65,35 +67,31 @@ def load_data(ticker):
 
     return df
 
-
 # ============================================================
-# FEATURE ENGINEERING
+# TREND FEATURES
 # ============================================================
 
 def compute_trend_features(df):
 
-    windows = [30]
+    w = 30
 
-    for w in windows:
+    df["rsi"] = ta.momentum.RSIIndicator(df["avg"], window=w).rsi()
 
-        df[f"rsi_{w}"] = ta.momentum.RSIIndicator(df["avg"], window=w).rsi()
+    df["stoch"] = ta.momentum.StochasticOscillator(
+        high=df["high"],
+        low=df["low"],
+        close=df["avg"],
+        window=w
+    ).stoch()
 
-        df[f"stoch_{w}"] = ta.momentum.StochasticOscillator(
-            high=df["high"],
-            low=df["low"],
-            close=df["avg"],
-            window=w
-        ).stoch()
-
-        df[f"willr_{w}"] = ta.momentum.WilliamsRIndicator(
-            df["high"],
-            df["low"],
-            df["avg"],
-            lbp=w
-        ).williams_r()
+    df["willr"] = ta.momentum.WilliamsRIndicator(
+        df["high"],
+        df["low"],
+        df["avg"],
+        lbp=w
+    ).williams_r()
 
     return df
-
 
 # ============================================================
 # TREND REGIME MODEL
@@ -105,7 +103,7 @@ def compute_trend_regime(df, n_clusters):
 
     df.dropna(inplace=True)
 
-    features = [c for c in df.columns if "rsi" in c or "stoch" in c or "willr" in c]
+    features = ["rsi", "stoch", "willr"]
 
     scaler = StandardScaler()
 
@@ -121,7 +119,6 @@ def compute_trend_regime(df, n_clusters):
 
     return df
 
-
 # ============================================================
 # VOLATILITY REGIME MODEL
 # ============================================================
@@ -133,7 +130,6 @@ def compute_volatility_features(df):
         df[f"vol_{w}"] = df["close"].pct_change().rolling(w).std()
 
     return df
-
 
 
 def compute_volatility_regime(df, n_clusters):
@@ -158,10 +154,50 @@ def compute_volatility_regime(df, n_clusters):
 
     return df
 
+# ============================================================
+# MOMENTUM MODEL
+# ============================================================
+
+def compute_momentum(tickers):
+
+    data = {}
+
+    for t in tickers:
+
+        df = load_data(t)
+
+        if df is None:
+            continue
+
+        for w in [20,60,120,180,240]:
+
+            df[f"perf_{w}"] = df["avg"].pct_change(w)
+
+        df["score"] = df[[f"perf_{w}" for w in [20,60,120,180,240]]].mean(axis=1)
+
+        data[t] = df[["score"]]
+
+    df = pd.concat(data, axis=1)
+
+    df.columns = df.columns.droplevel(1)
+
+    df.dropna(inplace=True)
+
+    return df
 
 # ============================================================
 # VISUALIZATION
 # ============================================================
+
+def filter_years(df, years):
+
+    start_idx = len(df) - years*252
+
+    if start_idx < 0:
+        start_idx = 0
+
+    return df.iloc[start_idx:]
+
 
 def plot_regime_chart(df, regime_col, title):
 
@@ -190,39 +226,6 @@ def plot_regime_chart(df, regime_col, title):
     return fig
 
 
-# ============================================================
-# MOMENTUM MODEL
-# ============================================================
-
-def compute_momentum(tickers):
-
-    data = {}
-
-    for t in tickers:
-
-        df = load_data(t)
-
-        if df is None:
-            continue
-
-        for w in [20,60,120,200]:
-
-            df[f"perf_{w}"] = df["avg"].pct_change(w)
-
-        df["score"] = df[[f"perf_{w}" for w in [20,60,120,200]]].mean(axis=1)
-
-        data[t] = df[["score"]]
-
-    df = pd.concat(data, axis=1)
-
-    df.columns = df.columns.droplevel(1)
-
-    df.dropna(inplace=True)
-
-    return df
-
-
-
 def plot_momentum(df):
 
     fig, ax = plt.subplots(figsize=(18,8), dpi=200)
@@ -233,7 +236,7 @@ def plot_momentum(df):
 
         ax.plot(df.index, df[col], label=col, color=colors[i])
 
-    ax.legend(ncol=2)
+    ax.legend(ncol=3)
 
     ax.set_title("Cross Asset Momentum")
 
@@ -241,106 +244,110 @@ def plot_momentum(df):
 
     return fig
 
-
 # ============================================================
-# UI LAYOUT (Professional Terminal)
+# SIDEBAR
 # ============================================================
-
-st.title("📊 Quant Market Terminal")
-
-st.markdown("---")
-
-# Sidebar Controls
 
 st.sidebar.title("Market Controls")
 
 analysis = st.sidebar.selectbox(
+
     "Module",
+
     [
         "Trend Regimes",
         "Volatility Regimes",
-        "Momentum Dashboard"
+        "Momentum Assets",
+        "Momentum Sectors",
+        "Momentum International"
     ]
 )
-
 
 ticker = st.sidebar.text_input("Ticker", "SPY").upper()
 
 clusters = st.sidebar.slider("Regimes",2,6,4)
 
+years = st.sidebar.number_input(
+    "Years of data",
+    min_value=1,
+    max_value=10,
+    value=1
+)
 
 # ============================================================
-# DASHBOARD HEADER METRICS
+# MOMENTUM GROUPS
 # ============================================================
 
+assets = ["SPY","QQQ","EFA","EEM","SLV","USO","VNQ","GLD"]
 
-df_price = load_data(ticker)
+sectors = ["XLY","XLP","XLE","XLF","XLV","XLI","XLB","XLRE","XLK","XLC","XLU"]
 
-if df_price is not None:
-
-    col1,col2,col3,col4 = st.columns(4)
-
-    last = df_price["close"].iloc[-1]
-
-    ret = df_price["close"].pct_change().iloc[-1]*100
-
-    vol = df_price["close"].pct_change().rolling(20).std().iloc[-1]*np.sqrt(252)*100
-
-    high = df_price["high"].rolling(252).max().iloc[-1]
-
-    col1.metric("Price", f"{last:.2f}")
-
-    col2.metric("Daily Return", f"{ret:.2f}%")
-
-    col3.metric("20D Volatility", f"{vol:.2f}%")
-
-    col4.metric("52W High", f"{high:.2f}")
-
-st.markdown("---")
-
+international = [
+"EWH","EWZ","MCHI","EZA","EWY","EWU","EWM","EWS","EWT","EIRL","EWI","EWP",
+"EWW","EIDO","EWA","EWQ","ECH","EWC","EWK","EWG","EWJ","EWD","EWO","EWL","EWN","INDA"
+]
 
 # ============================================================
-# MAIN TERMINAL AREA
+# MAIN TERMINAL
 # ============================================================
-
 
 if analysis == "Trend Regimes":
 
-    df = compute_trend_regime(df_price.copy(), clusters)
+    df = load_data(ticker)
 
-    fig = plot_regime_chart(df, "regime", f"{ticker} Trend Regimes")
+    df = compute_trend_regime(df, clusters)
+
+    df = filter_years(df, years)
+
+    fig = plot_regime_chart(df,"regime",f"{ticker} Trend Regimes")
 
     st.pyplot(fig)
 
 
 elif analysis == "Volatility Regimes":
 
-    df = compute_volatility_regime(df_price.copy(), clusters)
+    df = load_data(ticker)
 
-    fig = plot_regime_chart(df, "regime", f"{ticker} Volatility Regimes")
+    df = compute_volatility_regime(df, clusters)
+
+    df = filter_years(df, years)
+
+    fig = plot_regime_chart(df,"regime",f"{ticker} Volatility Regimes")
+
+    st.pyplot(fig)
+
+
+elif analysis == "Momentum Assets":
+
+    df = compute_momentum(assets)
+
+    df = filter_years(df, years)
+
+    fig = plot_momentum(df)
+
+    st.pyplot(fig)
+
+
+elif analysis == "Momentum Sectors":
+
+    df = compute_momentum(sectors)
+
+    df = filter_years(df, years)
+
+    fig = plot_momentum(df)
 
     st.pyplot(fig)
 
 
 else:
 
-    tickers_default = [
-        "SPY","QQQ","TLT","GLD","USO","VNQ",
-        "XLF","XLE","XLK","XLI","XLP","XLY"
-    ]
+    df = compute_momentum(international)
 
-    tickers = st.sidebar.multiselect(
-        "Assets",
-        tickers_default,
-        default=tickers_default
-    )
-
-    df = compute_momentum(tickers)
+    df = filter_years(df, years)
 
     fig = plot_momentum(df)
 
     st.pyplot(fig)
-
 
 st.markdown("---")
 
