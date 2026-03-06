@@ -326,8 +326,7 @@ ASSETS.append("VOO")
 st.sidebar.title("Market Controls")
 
 # AJOUTER CETTE LIGNE pour récupérer la clé API FRED
-api_key = st.sidebar.text_input("FRED API Key (macro)", type="password", 
-                                 help="Obtenez une clé gratuite sur fred.stlouisfed.org")
+api_key = st.secrets["0b1be764964fa26152877296823e7f2d"]
 
 analysis = st.sidebar.selectbox(
     "Module",
