@@ -324,31 +324,3 @@ else:  # Momentum International
 
 st.markdown("---")
 st.caption("Quant Research Terminal • Streamlit Prototype")
-
-# ============================================================
-# SUGGESTIONS D'AMÉLIORATIONS (non incluses dans le code exécuté)
-# ============================================================
-"""
-## Idées de modules complémentaires possibles
-
-1. **Google News Sentiment**  
-   Utiliser l'API Google News (ou une bibliothèque comme `gnews`) pour récupérer les titres récents d'un actif et en extraire un score de sentiment (via TextBlob, VADER, ou un modèle Transformer).
-
-2. **Google Trends**  
-   Analyser la popularité des recherches pour un mot‑clé (ex. "SPY", "inflation") via `pytrends` et la corréler avec les mouvements de prix.
-
-3. **Assistant Financier (Chatbot)**  
-   Intégrer un agent conversationnel basé sur un LLM (via l'API OpenAI ou un modèle open source) permettant de poser des questions sur les données chargées (ex. "Quel est le RSI actuel ?", "Quand a eu lieu le dernier régime de forte volatilité ?").
-
-4. **Analyse de corrélation dynamique**  
-   Afficher une matrice de corrélation glissante entre plusieurs actifs pour identifier les changements de régime de marché.
-
-5. **Backtest de stratégies simples**  
-   Permettre à l'utilisateur de définir des règles d'achat/vente basées sur les clusters (ex. "acheter quand le régime de tendance est 0 et que la PCA est positive") et visualiser la performance historique.
-
-6. **Carte de chaleur des performances**  
-   Représenter sous forme de heatmap les rendements annualisés par année pour chaque actif, secteur ou région.
-
-7. **Indicateurs macro‑économiques**  
-   Importer des données FRED (taux d'intérêt, chômage, PIB) via `pandas_datareader` et les superposer aux graphiques de prix.
-"""
