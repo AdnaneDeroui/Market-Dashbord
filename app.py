@@ -12,6 +12,12 @@ from sklearn.mixture import BayesianGaussianMixture
 import ta
 import warnings
 warnings.filterwarnings("ignore")
+try:
+    from fredapi import Fred
+    FRED_AVAILABLE = True
+except ImportError:
+    st.warning("La bibliothèque 'fredapi' n'est pas installée. Le module macro-économique ne fonctionnera pas. Installez-la avec `pip install fredapi`.")
+    FRED_AVAILABLE = False
 
 # ============================================================
 # Import des fonctions avancées de volatilité (quantreo)
@@ -84,6 +90,57 @@ def load_data(ticker):
     # Prix moyen OHLC
     df["avg"] = (df["open"] + df["high"] + df["low"] + df["close"]) / 4
     return df
+
+# ============================================================
+# CHARGEMENT DES DONNÉES MACROS (avec cache)
+# ============================================================
+@st.cache_data(ttl=43200) # Cache de 12 heures car les données macro changent moins souvent
+def load_macro_data(api_key):
+    """
+    Télécharge les indicateurs macro US depuis FRED.
+    Nécessite une clé API.
+    """
+    if not FRED_AVAILABLE:
+        return None
+
+    try:
+        fred = Fred(api_key=api_key)
+
+        # Dictionnaire des séries à télécharger
+        series_dict = {
+            'Inflation (CPI YoY)': 'CPIAUCSL',
+            'Taux d\'Intérêt (Fed Funds)': 'FEDFUNDS',
+            'Taux de Chômage': 'UNRATE',
+            'PIB Réel (GDP)': 'GDPC1'
+        }
+
+        data_frames = []
+        for name, series_id in series_dict.items():
+            # Télécharger les données
+            series_data = fred.get_series(series_id)
+            df_series = series_data.to_frame(name=name)
+            data_frames.append(df_series)
+
+        # Concaténer toutes les séries sur l'axe des colonnes
+        from functools import reduce
+        df = reduce(lambda left, right: pd.merge(left, right, left_index=True, right_index=True, how='outer'), data_frames)
+
+        # Calculer les variations annuelles pour l'inflation et le PIB
+        df['Inflation (CPI YoY)'] = df['Inflation (CPI YoY)'].pct_change(12) * 100  # Changement sur 12 mois pour le YoY
+        df['Croissance PIB (YoY)'] = df['PIB Réel (GDP)'].pct_change(4) * 100 # Changement sur 4 trimestres
+
+        # On supprime les colonnes originales si on le souhaite
+        df = df.drop(columns=['Inflation (CPI YoY)_x', 'PIB Réel (GDP)']) # Attention aux noms après le merge
+        df = df.rename(columns={'Inflation (CPI YoY)_y': 'Inflation (CPI YoY)'})
+        
+        # Nettoyer et garder seulement les colonnes qui nous intéressent
+        df = df[['Inflation (CPI YoY)', 'Taux d\'Intérêt (Fed Funds)', 'Taux de Chômage', 'Croissance PIB (YoY)']]
+
+        return df.dropna()
+
+    except Exception as e:
+        st.error(f"Erreur lors du chargement des données macro: {e}")
+        return None
 
 # ============================================================
 # INDICATEURS DE TENDANCE (fenêtre 31)
@@ -224,6 +281,29 @@ def plot_momentum_chart(df, title):
     ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax.xaxis.get_major_locator()))
     return fig
 
+def plot_macro_chart(df, title):
+    """Affiche les indicateurs macroéconomiques."""
+    fig, axes = plt.subplots(2, 2, figsize=(18, 10), dpi=200)
+    axes = axes.flatten()
+
+    colors = ['#00FF00', '#FFA500', '#FF0000', '#56B4E9']
+
+    for i, col in enumerate(df.columns):
+        ax = axes[i]
+        ax.plot(df.index, df[col], color=colors[i], linewidth=2, label=col)
+        ax.fill_between(df.index, 0, df[col], alpha=0.2, color=colors[i])
+        ax.set_title(col, fontsize=14, weight='bold')
+        ax.set_ylabel('Valeur (%)')
+        ax.grid(True, alpha=0.3)
+        ax.axhline(0, color='white', linestyle='--', linewidth=0.8, alpha=0.7)
+        ax.legend(loc='upper left')
+        ax.xaxis.set_major_locator(mdates.YearLocator())
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+
+    plt.suptitle(title, fontsize=18, weight='bold', y=1.02)
+    plt.tight_layout()
+    return fig
+
 # ============================================================
 # LISTES DE TICKERS PAR CATÉGORIE
 # ============================================================
@@ -255,7 +335,8 @@ analysis = st.sidebar.selectbox(
         "Volatility Regimes",
         "Momentum Assets",
         "Momentum Sectors",
-        "Momentum International"
+        "Momentum International",
+        "US Macro Indicators"  
     ]
 )
 
@@ -321,6 +402,24 @@ else:  # Momentum International
         df = filter_years(df, years)
         fig = plot_momentum_chart(df, "Momentum International")
         st.pyplot(fig)
+        
+# --- NOUVEAU : Macro Indicators ---
+elif analysis == "US Macro Indicators":
+    if not api_key:
+        st.warning("Veuillez entrer votre clé API FRED dans la barre latérale pour accéder aux données macro.")
+    else:
+        with st.spinner("Chargement des indicateurs macroéconomiques..."):
+            df_macro = load_macro_data(api_key)
+            if df_macro is not None:
+                df_macro = filter_years(df_macro, years)  # Réutilise votre fonction existante
+                fig = plot_macro_chart(df_macro, "Indicateurs Macroéconomiques US")
+                st.pyplot(fig)
+                
+                # Afficher un tableau des dernières valeurs
+                st.subheader("Dernières valeurs")
+                st.dataframe(df_macro.tail().round(2))
+            else:
+                st.error("Impossible de charger les données macro. Vérifiez votre clé API.")
 
 st.markdown("---")
 st.caption("Quant Research Terminal • Streamlit Prototype")
