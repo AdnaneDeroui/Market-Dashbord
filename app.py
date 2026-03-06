@@ -94,7 +94,7 @@ def load_data(ticker):
 # ============================================================
 # CHARGEMENT DES DONNÉES MACROS (avec cache)
 # ============================================================
-@st.cache_data(ttl=43200) # Cache de 12 heures car les données macro changent moins souvent
+@st.cache_data(ttl=43200)
 def load_macro_data(api_key):
     """
     Télécharge les indicateurs macro US depuis FRED.
@@ -106,37 +106,34 @@ def load_macro_data(api_key):
     try:
         fred = Fred(api_key=api_key)
 
-        # Dictionnaire des séries à télécharger
-        series_dict = {
-            'Inflation (CPI YoY)': 'CPIAUCSL',
-            'Taux d\'Intérêt (Fed Funds)': 'FEDFUNDS',
-            'Taux de Chômage': 'UNRATE',
-            'PIB Réel (GDP)': 'GDPC1'
-        }
+        # Télécharger les séries brutes
+        cpi = fred.get_series('CPIAUCSL')          # Inflation (CPI)
+        fedfunds = fred.get_series('FEDFUNDS')     # Taux d'intérêt effectif
+        unrate = fred.get_series('UNRATE')         # Taux de chômage
+        gdp = fred.get_series('GDPC1')             # PIB réel (chaîné)
 
-        data_frames = []
-        for name, series_id in series_dict.items():
-            # Télécharger les données
-            series_data = fred.get_series(series_id)
-            df_series = series_data.to_frame(name=name)
-            data_frames.append(df_series)
+        # Créer un DataFrame avec toutes les séries
+        df = pd.DataFrame({
+            'CPI': cpi,
+            'FedFunds': fedfunds,
+            'Unemployment': unrate,
+            'GDP': gdp
+        })
 
-        # Concaténer toutes les séries sur l'axe des colonnes
-        from functools import reduce
-        df = reduce(lambda left, right: pd.merge(left, right, left_index=True, right_index=True, how='outer'), data_frames)
+        # Calculer les variations annuelles (en pourcentage)
+        df['Inflation (CPI YoY)'] = df['CPI'].pct_change(12) * 100   # 12 mois → YoY
+        df['Croissance PIB (YoY)'] = df['GDP'].pct_change(4) * 100    # 4 trimestres → YoY
 
-        # Calculer les variations annuelles pour l'inflation et le PIB
-        df['Inflation (CPI YoY)'] = df['Inflation (CPI YoY)'].pct_change(12) * 100  # Changement sur 12 mois pour le YoY
-        df['Croissance PIB (YoY)'] = df['PIB Réel (GDP)'].pct_change(4) * 100 # Changement sur 4 trimestres
+        # Conserver uniquement les colonnes finales et renommer
+        df_final = df[['Inflation (CPI YoY)', 'FedFunds', 'Unemployment', 'Croissance PIB (YoY)']].copy()
+        df_final.columns = [
+            'Inflation (CPI YoY)',
+            "Taux d'Intérêt (Fed Funds)",
+            'Taux de Chômage',
+            'Croissance PIB (YoY)'
+        ]
 
-        # On supprime les colonnes originales si on le souhaite
-        df = df.drop(columns=['Inflation (CPI YoY)_x', 'PIB Réel (GDP)']) # Attention aux noms après le merge
-        df = df.rename(columns={'Inflation (CPI YoY)_y': 'Inflation (CPI YoY)'})
-        
-        # Nettoyer et garder seulement les colonnes qui nous intéressent
-        df = df[['Inflation (CPI YoY)', 'Taux d\'Intérêt (Fed Funds)', 'Taux de Chômage', 'Croissance PIB (YoY)']]
-
-        return df.dropna()
+        return df_final.dropna()
 
     except Exception as e:
         st.error(f"Erreur lors du chargement des données macro: {e}")
