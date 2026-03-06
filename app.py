@@ -9,323 +9,339 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import KernelPCA
 from sklearn.cluster import KMeans
 from sklearn.mixture import BayesianGaussianMixture
-import quantreo.features_engineering as fe
 import ta
 import warnings
 warnings.filterwarnings("ignore")
 
-# Configuration de la page
-st.set_page_config(page_title="Market Analysis Dashboard", layout="wide")
-st.title("📈 Market Analysis Dashboard")
+# ============================================================
+# PAGE CONFIG
+# ============================================================
 
-# ------------------------------------------------------------
-# Style Bloomberg pour les graphiques
-# ------------------------------------------------------------
-def set_bloomberg_style():
-    """Applique un style de graphique proche des terminaux Bloomberg."""
-    plt.style.use('dark_background')
-    rcParams.update({
-        'figure.facecolor': '#1e1e1e',
-        'axes.facecolor': '#1e1e1e',
-        'axes.edgecolor': '#4d4d4d',
-        'axes.labelcolor': 'white',
-        'axes.labelsize': 12,
-        'axes.grid': True,
-        'grid.color': '#4d4d4d',
-        'grid.linestyle': '--',
-        'grid.alpha': 0.4,
-        'xtick.color': 'white',
-        'ytick.color': 'white',
-        'legend.fontsize': 10,
-        'legend.frameon': True,
-        'legend.framealpha': 0.8,
-        'legend.facecolor': '#2b2b2b',
-        'legend.edgecolor': '#4d4d4d',
-        'text.color': 'white',
-        'font.family': 'sans-serif',
-        'font.sans-serif': ['Arial', 'Helvetica', 'DejaVu Sans'],
-    })
-
-# ------------------------------------------------------------
-# Mise en cache des données
-# ------------------------------------------------------------
-@st.cache_data(ttl=3600)
-def load_data(ticker):
-    df = yf.download(ticker, interval='1d', period='max', progress=False)
-    if df.empty:
-        return None
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.droplevel(1)
-    df.columns = [col.lower() for col in df.columns]
-    # Calcul du prix moyen (OHLC)
-    df['avg'] = (df['open'] + df['high'] + df['low'] + df['close']) / 4
-    return df
-
-# ------------------------------------------------------------
-# Fonctions d'analyse avec graphiques améliorés
-# ------------------------------------------------------------
-def plot_trend_clusters(ticker, n_clusters=4, years=1):
-    set_bloomberg_style()
-    df = load_data(ticker)
-    if df is None:
-        st.error(f"Aucune donnée trouvée pour {ticker}")
-        return None
-    required = ['close', 'high', 'low', 'open', 'volume']
-    if not all(col in df.columns for col in required):
-        st.error(f"Colonnes manquantes pour {ticker}")
-        return None
-
-    # Calcul des indicateurs de tendance sur le prix moyen
-    windows = [31]
-    for w in windows:
-        df[f'vol_rsi_{w}'] = ta.momentum.RSIIndicator(df['avg'], window=w).rsi()
-        df[f"vol_stoch_{w}"] = ta.momentum.StochasticOscillator(
-            high=df["high"], low=df["low"], close=df["avg"], window=w
-        ).stoch_signal()
-        df[f"vol_willr_{w}"] = ta.momentum.WilliamsRIndicator(
-            df["high"], df["low"], df["avg"], lbp=w
-        ).williams_r()
-
-    df.dropna(inplace=True)
-
-    vol_features = [col for col in df.columns if col.startswith('vol_') and 'volatility' not in col]
-    train_size = int(len(df) * 0.8)
-    train_df = df.iloc[:train_size].copy()
-    scaler = StandardScaler()
-    scaler.fit(train_df[vol_features])
-    scaled_features = scaler.transform(df[vol_features])
-
-    pca = KernelPCA(n_components=1)
-    pca.fit(scaler.transform(train_df[vol_features]))
-    df['volatility_pca'] = pca.transform(scaled_features)
-
-    bgm = BayesianGaussianMixture(n_components=n_clusters, random_state=42)
-    df['volatility_cluster'] = bgm.fit_predict(df[['volatility_pca']])
-
-    # Filtre sur les dernières années
-    start_idx = len(df) - (years * 252)
-    plot_df = df.iloc[start_idx:].copy()
-
-    # ---------- Figure 1 : Prix moyen et clusters ----------
-    fig, ax = plt.subplots(figsize=(16, 7), dpi=300)
-    cmap = plt.cm.get_cmap("tab10", n_clusters)
-    cluster_colors = [cmap(i) for i in range(n_clusters)]
-
-    ax.plot(plot_df.index, plot_df["avg"], color="#F0F0F0", linewidth=1.6, alpha=0.9, label="Avg Price (OHLC)")
-
-    for cluster in range(n_clusters):
-        cluster_data = plot_df[plot_df["volatility_cluster"] == cluster]
-        ax.scatter(cluster_data.index, cluster_data["avg"],
-                   s=25, color=cluster_colors[cluster], alpha=0.9, label=f"Cluster {cluster}")
-
-    ax.plot(plot_df.index, plot_df["avg"].rolling(50).mean(),
-            linestyle="--", linewidth=1.5, color="#E69F00", alpha=0.9, label="50D MA (avg)")
-    ax.plot(plot_df.index, plot_df["avg"].rolling(200).mean(),
-            linestyle="--", linewidth=1.5, color="#56B4E9", alpha=0.9, label="200D MA (avg)")
-
-    ax.set_title(f"{ticker} – Trend Regimes (BayesianGaussianMixture)", fontsize=16, weight="bold", pad=15)
-    ax.set_xlabel("Date", fontsize=12)
-    ax.set_ylabel("Average Price (log scale)", fontsize=12)
-    ax.set_yscale("log")
-    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax.xaxis.get_major_locator()))
-    ax.legend(loc='upper left', frameon=True)
-    plt.tight_layout()
-
-    # ---------- Figure 2 : Composante PCA ----------
-    fig2, ax2 = plt.subplots(figsize=(16, 4), dpi=300)
-    ax2.fill_between(plot_df.index, 0, plot_df["volatility_pca"],
-                     where=plot_df["volatility_pca"] >= 0,
-                     color='#00FF00', alpha=0.3, label='Positive')
-    ax2.fill_between(plot_df.index, 0, plot_df["volatility_pca"],
-                     where=plot_df["volatility_pca"] < 0,
-                     color='#FF0000', alpha=0.3, label='Negative')
-    ax2.plot(plot_df.index, plot_df["volatility_pca"], color="#FFFFFF", linewidth=1.4, label='PCA')
-    ax2.axhline(0, linestyle="-", linewidth=0.8, color="gray", alpha=0.6)
-    ax2.set_title(f"{ticker} – Trend PCA Component", fontsize=14, weight="bold", pad=12)
-    ax2.set_xlabel("Date", fontsize=11)
-    ax2.set_ylabel("Kernel PCA (1st Component)", fontsize=11)
-    ax2.xaxis.set_major_locator(mdates.AutoDateLocator())
-    ax2.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax2.xaxis.get_major_locator()))
-    ax2.legend(loc='upper right', frameon=True)
-    plt.tight_layout()
-
-    return fig, fig2
-
-def plot_volatility_clusters(ticker, n_clusters=4, years=1):
-    set_bloomberg_style()
-    df = load_data(ticker)
-    if df is None:
-        st.error(f"Aucune donnée trouvée pour {ticker}")
-        return None
-    required = ['close', 'high', 'low', 'open', 'volume']
-    if not all(col in df.columns for col in required):
-        st.error(f"Colonnes manquantes pour {ticker}")
-        return None
-
-    # Calcul des mesures de volatilité (inchangé, utilise OHLC)
-    for w in [5, 10, 20, 50, 100]:
-        df[f'vol_close_to_close_{w}'] = fe.volatility.close_to_close_volatility(df, window_size=w)
-        df[f'vol_parkinson_{w}'] = fe.volatility.parkinson_volatility(df, high_col='high', low_col='low', window_size=w)
-        df[f'vol_rogers_satchell_{w}'] = fe.volatility.rogers_satchell_volatility(
-            df, high_col='high', low_col='low', open_col='open', close_col='close', window_size=w)
-        df[f'vol_yang_zhang_{w}'] = fe.volatility.yang_zhang_volatility(
-            df, high_col='high', low_col='low', open_col='open', close_col='close', window_size=w)
-
-    df.dropna(inplace=True)
-
-    vol_features = [col for col in df.columns if col.startswith('vol_') and 'volatility' not in col]
-    train_size = int(len(df) * 0.8)
-    train_df = df.iloc[:train_size].copy()
-    scaler = StandardScaler()
-    scaler.fit(train_df[vol_features])
-    scaled_features = scaler.transform(df[vol_features])
-
-    pca = KernelPCA(n_components=1)
-    pca.fit(scaler.transform(train_df[vol_features]))
-    df['volatility_pca'] = pca.transform(scaled_features)
-
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-    df['volatility_cluster'] = kmeans.fit_predict(df[['volatility_pca']])
-
-    start_idx = len(df) - (years * 252)
-    plot_df = df.iloc[start_idx:].copy()
-
-    # ---------- Figure 1 : Prix moyen et clusters ----------
-    fig, ax = plt.subplots(figsize=(16, 7), dpi=300)
-    cmap = plt.cm.get_cmap("tab10", n_clusters)
-    cluster_colors = [cmap(i) for i in range(n_clusters)]
-
-    ax.plot(plot_df.index, plot_df["avg"], color="#F0F0F0", linewidth=1.6, alpha=0.9, label="Avg Price (OHLC)")
-
-    for cluster in range(n_clusters):
-        cluster_data = plot_df[plot_df["volatility_cluster"] == cluster]
-        ax.scatter(cluster_data.index, cluster_data["avg"],
-                   s=25, color=cluster_colors[cluster], alpha=0.9, label=f"Cluster {cluster}")
-
-    ax.plot(plot_df.index, plot_df["avg"].rolling(50).mean(),
-            linestyle="--", linewidth=1.5, color="#E69F00", alpha=0.9, label="50D MA (avg)")
-    ax.plot(plot_df.index, plot_df["avg"].rolling(200).mean(),
-            linestyle="--", linewidth=1.5, color="#56B4E9", alpha=0.9, label="200D MA (avg)")
-
-    ax.set_title(f"{ticker} – Volatility Regimes (K-Means)", fontsize=16, weight="bold", pad=15)
-    ax.set_xlabel("Date", fontsize=12)
-    ax.set_ylabel("Average Price (log scale)", fontsize=12)
-    ax.set_yscale("log")
-    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax.xaxis.get_major_locator()))
-    ax.legend(loc='upper left', frameon=True)
-    plt.tight_layout()
-
-    # ---------- Figure 2 : Composante PCA ----------
-    fig2, ax2 = plt.subplots(figsize=(16, 4), dpi=300)
-    ax2.fill_between(plot_df.index, 0, plot_df["volatility_pca"],
-                     where=plot_df["volatility_pca"] >= 0,
-                     color='#00FF00', alpha=0.3, label='Positive')
-    ax2.fill_between(plot_df.index, 0, plot_df["volatility_pca"],
-                     where=plot_df["volatility_pca"] < 0,
-                     color='#FF0000', alpha=0.3, label='Negative')
-    ax2.plot(plot_df.index, plot_df["volatility_pca"], color="#FFFFFF", linewidth=1.4, label='PCA')
-    ax2.axhline(0, linestyle="-", linewidth=0.8, color="gray", alpha=0.6)
-    ax2.set_title(f"{ticker} – Volatility PCA Component", fontsize=14, weight="bold", pad=12)
-    ax2.set_xlabel("Date", fontsize=11)
-    ax2.set_ylabel("Kernel PCA (1st Component)", fontsize=11)
-    ax2.xaxis.set_major_locator(mdates.AutoDateLocator())
-    ax2.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax2.xaxis.get_major_locator()))
-    ax2.legend(loc='upper right', frameon=True)
-    plt.tight_layout()
-
-    return fig, fig2
-
-def plot_momentum_scores(tickers, years=1):
-    set_bloomberg_style()
-    data = {}
-    for ticker in tickers:
-        df = yf.download(ticker, period="max", interval="1d", progress=False)
-        if df.empty:
-            st.warning(f"Pas de données pour {ticker}, ignoré.")
-            continue
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.droplevel(1)
-        # Calcul du prix moyen (OHLC) et des scores
-        df['avg'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
-        for t in [20, 60, 120, 180, 240]:
-            df[f"Perf_{t}d"] = df["avg"].pct_change(t)
-        df["Score"] = df[[f"Perf_{t}d" for t in [20,60,120,180,240]]].mean(axis=1)
-        data[ticker] = df[["Score"]].dropna()
-
-    if not data:
-        st.error("Aucune donnée valide pour les tickers sélectionnés.")
-        return None
-
-    df_concat = pd.concat(data, axis=1)
-    df_concat.columns = df_concat.columns.droplevel(1)
-    df_concat.dropna(inplace=True)
-    if len(df_concat) == 0:
-        st.error("Pas assez de données pour calculer les scores.")
-        return None
-
-    start_idx = len(df_concat) - years * 252
-    if start_idx < 0:
-        start_idx = 0
-    plot_df = df_concat.iloc[start_idx:]
-
-    colors = plt.cm.gist_ncar(np.linspace(0, 1, len(plot_df.columns)))
-    fig, ax = plt.subplots(figsize=(20, 10), dpi=600)
-    for i, col in enumerate(plot_df.columns):
-        ax.plot(plot_df.index, plot_df[col], color=colors[i], linewidth=2, alpha=0.8, label=col)
-    ax.legend(loc='upper left', frameon=True, ncol=2, fontsize=10)
-    ax.set_title("Momentum Score (based on Avg Price) for Different Asset Classes", fontsize=16, weight="bold", pad=15)
-    ax.set_xlabel("Date", fontsize=12)
-    ax.set_ylabel("Momentum Score", fontsize=12)
-    ax.grid(True, linestyle="--", alpha=0.4)
-    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax.xaxis.get_major_locator()))
-    plt.tight_layout()
-    return fig
-
-# ------------------------------------------------------------
-# Interface utilisateur (inchangée)
-# ------------------------------------------------------------
-st.sidebar.header("Paramètres")
-option = st.sidebar.selectbox(
-    "Choisissez une analyse",
-    ["Trend Clusters", "Volatility Clusters", "Momentum Scores"]
+st.set_page_config(
+    page_title="Professional Market Terminal",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-if option == "Trend Clusters":
-    ticker = st.sidebar.text_input("Ticker", value="SPY").upper()
-    n_clusters = st.sidebar.slider("Nombre de clusters", min_value=2, max_value=6, value=4)
-    years = st.sidebar.number_input("Nombre d'années", min_value=1, max_value=10, value=1, step=1)
-    if st.sidebar.button("Lancer l'analyse"):
-        with st.spinner("Calcul en cours..."):
-            result = plot_trend_clusters(ticker, n_clusters, years)
-            if result:
-                fig1, fig2 = result
-                st.pyplot(fig1)
-                st.pyplot(fig2)
+# ============================================================
+# GLOBAL STYLE (Bloomberg-like)
+# ============================================================
 
-elif option == "Volatility Clusters":
-    ticker = st.sidebar.text_input("Ticker", value="SPY").upper()
-    n_clusters = st.sidebar.slider("Nombre de clusters", min_value=2, max_value=6, value=4)
-    years = st.sidebar.number_input("Nombre d'années", min_value=1, max_value=10, value=1, step=1)
-    if st.sidebar.button("Lancer l'analyse"):
-        with st.spinner("Calcul en cours..."):
-            result = plot_volatility_clusters(ticker, n_clusters, years)
-            if result:
-                fig1, fig2 = result
-                st.pyplot(fig1)
-                st.pyplot(fig2)
+def set_terminal_style():
+    plt.style.use("dark_background")
 
-else:  # Momentum Scores
-    tickers_default = ["QQQ", "SPY", "EFA", "EEM", "TLT", "GLD", "USO", "SLV", "VNQ", "XLY", "XLP", "XLE", "XLF", "XLV", "XLI", 
-                       "XLB", "XLRE", "XLK", "XLC", "XLU", "XBI", "GDX", "GREK", "EWH", "EWZ", "MCHI", "EZA", "EWY", "EWU", 
-                       "EWM", "EWS", "EWT", "EIRL", "EWI", "EWP", "EWW", "EIDO", "EWA", "EWQ", "ECH", "EWC", "EWK", "EWG", 
-                       "EWJ", "EWD", "EWO", "EWL", "EWN", "VOO", "INDA"]
-    tickers = st.sidebar.multiselect("Sélectionnez les tickers", options=tickers_default, default=tickers_default)
-    years = st.sidebar.number_input("Nombre d'années", min_value=1, max_value=10, value=1, step=1)
-    if st.sidebar.button("Lancer l'analyse"):
-        with st.spinner("Téléchargement et calcul..."):
-            fig = plot_momentum_scores(tickers, years)
-            if fig:
-                st.pyplot(fig)
+    rcParams.update({
+        "figure.facecolor": "#0E1117",
+        "axes.facecolor": "#0E1117",
+        "axes.edgecolor": "#3A3F44",
+        "axes.labelcolor": "white",
+        "xtick.color": "white",
+        "ytick.color": "white",
+        "grid.color": "#2A2F36",
+        "grid.alpha": 0.3,
+        "font.size": 11
+    })
+
+set_terminal_style()
+
+# ============================================================
+# DATA ENGINE
+# ============================================================
+
+@st.cache_data(ttl=3600)
+def load_data(ticker):
+
+    df = yf.download(ticker, period="max", interval="1d", progress=False)
+
+    if df.empty:
+        return None
+
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.droplevel(1)
+
+    df.columns = [c.lower() for c in df.columns]
+
+    df["avg"] = (df["open"] + df["high"] + df["low"] + df["close"]) / 4
+
+    return df
+
+
+# ============================================================
+# FEATURE ENGINEERING
+# ============================================================
+
+def compute_trend_features(df):
+
+    windows = [30]
+
+    for w in windows:
+
+        df[f"rsi_{w}"] = ta.momentum.RSIIndicator(df["avg"], window=w).rsi()
+
+        df[f"stoch_{w}"] = ta.momentum.StochasticOscillator(
+            high=df["high"],
+            low=df["low"],
+            close=df["avg"],
+            window=w
+        ).stoch()
+
+        df[f"willr_{w}"] = ta.momentum.WilliamsRIndicator(
+            df["high"],
+            df["low"],
+            df["avg"],
+            lbp=w
+        ).williams_r()
+
+    return df
+
+
+# ============================================================
+# TREND REGIME MODEL
+# ============================================================
+
+def compute_trend_regime(df, n_clusters):
+
+    df = compute_trend_features(df)
+
+    df.dropna(inplace=True)
+
+    features = [c for c in df.columns if "rsi" in c or "stoch" in c or "willr" in c]
+
+    scaler = StandardScaler()
+
+    X = scaler.fit_transform(df[features])
+
+    pca = KernelPCA(n_components=1)
+
+    df["trend_pca"] = pca.fit_transform(X)
+
+    model = BayesianGaussianMixture(n_components=n_clusters, random_state=0)
+
+    df["regime"] = model.fit_predict(df[["trend_pca"]])
+
+    return df
+
+
+# ============================================================
+# VOLATILITY REGIME MODEL
+# ============================================================
+
+def compute_volatility_features(df):
+
+    for w in [5,10,20,50]:
+
+        df[f"vol_{w}"] = df["close"].pct_change().rolling(w).std()
+
+    return df
+
+
+
+def compute_volatility_regime(df, n_clusters):
+
+    df = compute_volatility_features(df)
+
+    df.dropna(inplace=True)
+
+    features = [c for c in df.columns if "vol_" in c]
+
+    scaler = StandardScaler()
+
+    X = scaler.fit_transform(df[features])
+
+    pca = KernelPCA(n_components=1)
+
+    df["vol_pca"] = pca.fit_transform(X)
+
+    model = KMeans(n_clusters=n_clusters, random_state=0)
+
+    df["regime"] = model.fit_predict(df[["vol_pca"]])
+
+    return df
+
+
+# ============================================================
+# VISUALIZATION
+# ============================================================
+
+def plot_regime_chart(df, regime_col, title):
+
+    fig, ax = plt.subplots(figsize=(16,6), dpi=200)
+
+    ax.plot(df.index, df["avg"], linewidth=1.5)
+
+    clusters = df[regime_col].unique()
+
+    cmap = plt.cm.get_cmap("tab10", len(clusters))
+
+    for c in clusters:
+
+        temp = df[df[regime_col] == c]
+
+        ax.scatter(temp.index, temp["avg"], s=15, color=cmap(c), label=f"Regime {c}")
+
+    ax.set_title(title)
+
+    ax.set_yscale("log")
+
+    ax.legend()
+
+    ax.grid(True)
+
+    return fig
+
+
+# ============================================================
+# MOMENTUM MODEL
+# ============================================================
+
+def compute_momentum(tickers):
+
+    data = {}
+
+    for t in tickers:
+
+        df = load_data(t)
+
+        if df is None:
+            continue
+
+        for w in [20,60,120,200]:
+
+            df[f"perf_{w}"] = df["avg"].pct_change(w)
+
+        df["score"] = df[[f"perf_{w}" for w in [20,60,120,200]]].mean(axis=1)
+
+        data[t] = df[["score"]]
+
+    df = pd.concat(data, axis=1)
+
+    df.columns = df.columns.droplevel(1)
+
+    df.dropna(inplace=True)
+
+    return df
+
+
+
+def plot_momentum(df):
+
+    fig, ax = plt.subplots(figsize=(18,8), dpi=200)
+
+    colors = plt.cm.gist_ncar(np.linspace(0,1,len(df.columns)))
+
+    for i,col in enumerate(df.columns):
+
+        ax.plot(df.index, df[col], label=col, color=colors[i])
+
+    ax.legend(ncol=2)
+
+    ax.set_title("Cross Asset Momentum")
+
+    ax.grid(True)
+
+    return fig
+
+
+# ============================================================
+# UI LAYOUT (Professional Terminal)
+# ============================================================
+
+st.title("📊 Quant Market Terminal")
+
+st.markdown("---")
+
+# Sidebar Controls
+
+st.sidebar.title("Market Controls")
+
+analysis = st.sidebar.selectbox(
+    "Module",
+    [
+        "Trend Regimes",
+        "Volatility Regimes",
+        "Momentum Dashboard"
+    ]
+)
+
+
+ticker = st.sidebar.text_input("Ticker", "SPY").upper()
+
+clusters = st.sidebar.slider("Regimes",2,6,4)
+
+
+# ============================================================
+# DASHBOARD HEADER METRICS
+# ============================================================
+
+
+df_price = load_data(ticker)
+
+if df_price is not None:
+
+    col1,col2,col3,col4 = st.columns(4)
+
+    last = df_price["close"].iloc[-1]
+
+    ret = df_price["close"].pct_change().iloc[-1]*100
+
+    vol = df_price["close"].pct_change().rolling(20).std().iloc[-1]*np.sqrt(252)*100
+
+    high = df_price["high"].rolling(252).max().iloc[-1]
+
+    col1.metric("Price", f"{last:.2f}")
+
+    col2.metric("Daily Return", f"{ret:.2f}%")
+
+    col3.metric("20D Volatility", f"{vol:.2f}%")
+
+    col4.metric("52W High", f"{high:.2f}")
+
+st.markdown("---")
+
+
+# ============================================================
+# MAIN TERMINAL AREA
+# ============================================================
+
+
+if analysis == "Trend Regimes":
+
+    df = compute_trend_regime(df_price.copy(), clusters)
+
+    fig = plot_regime_chart(df, "regime", f"{ticker} Trend Regimes")
+
+    st.pyplot(fig)
+
+
+elif analysis == "Volatility Regimes":
+
+    df = compute_volatility_regime(df_price.copy(), clusters)
+
+    fig = plot_regime_chart(df, "regime", f"{ticker} Volatility Regimes")
+
+    st.pyplot(fig)
+
+
+else:
+
+    tickers_default = [
+        "SPY","QQQ","TLT","GLD","USO","VNQ",
+        "XLF","XLE","XLK","XLI","XLP","XLY"
+    ]
+
+    tickers = st.sidebar.multiselect(
+        "Assets",
+        tickers_default,
+        default=tickers_default
+    )
+
+    df = compute_momentum(tickers)
+
+    fig = plot_momentum(df)
+
+    st.pyplot(fig)
+
+
+st.markdown("---")
+
+st.caption("Quant Research Terminal • Streamlit Prototype")
