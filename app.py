@@ -394,7 +394,7 @@ elif analysis == "Momentum Sectors":
         fig = plot_momentum_chart(df, "Momentum Sectoriel (ETFs)")
         st.pyplot(fig)
 
-else:  # Momentum International
+elif analysis == "Momentum International":
     df = compute_momentum(INTERNATIONAL)
     if df is None:
         st.error("Aucune donnée disponible pour les ETFs internationaux.")
