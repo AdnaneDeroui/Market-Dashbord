@@ -270,7 +270,7 @@ def plot_momentum_scores(tickers, years=1):
         start_idx = 0
     plot_df = df_concat.iloc[start_idx:]
 
-    colors = plt.cm.jet(np.linspace(0, 1, len(plot_df.columns)))
+    colors = plt.cm.gist_ncar(np.linspace(0, 1, len(plot_df.columns)))
     fig, ax = plt.subplots(figsize=(20, 10), dpi=600)
     for i, col in enumerate(plot_df.columns):
         ax.plot(plot_df.index, plot_df[col], color=colors[i], linewidth=2, alpha=0.8, label=col)
