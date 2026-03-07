@@ -484,7 +484,7 @@ elif analysis == "US Macro Indicators":
                 st.error("Impossible de charger les données macro. Vérifiez votre clé API.")
 # --- MODULE GOOGLE TRENDS ---
 elif analysis == "Google Trends":
-    if not PYTENDS_AVAILABLE:
+    if not PYTRENDS_AVAILABLE:
         st.error("La bibliothèque 'pytrends' n'est pas installée. Veuillez l'installer pour utiliser ce module.")
     elif not trends_keywords:
         st.warning("Veuillez saisir au moins un mot-clé.")
