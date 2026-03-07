@@ -12,6 +12,7 @@ from sklearn.mixture import BayesianGaussianMixture
 import ta
 import warnings
 warnings.filterwarnings("ignore")
+
 try:
     from fredapi import Fred
     FRED_AVAILABLE = True
