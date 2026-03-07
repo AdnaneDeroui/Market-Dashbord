@@ -20,10 +20,10 @@ except ImportError:
     FRED_AVAILABLE = False
 try:
     from pytrends.request import TrendReq
-    PYTENDS_AVAILABLE = True
+    PYTRENDS_AVAILABLE = True
 except ImportError:
     st.warning("La bibliothèque 'pytrends' n'est pas installée. Le module Google Trends ne fonctionnera pas. Installez-la avec `pip install pytrends`.")
-    PYTENDS_AVAILABLE = False
+    PYTRENDS_AVAILABLE = False
 
 # ============================================================
 # Import des fonctions avancées de volatilité (quantreo)
