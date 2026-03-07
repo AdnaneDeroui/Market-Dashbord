@@ -312,23 +312,38 @@ def plot_macro_chart(df, title):
 # ============================================================
 @st.cache_data(ttl=3600)
 def load_trends_data(keywords: tuple, timeframe='today 5-y'):
-    """
-    Télécharge les données Google Trends pour une tuple de mots-clés.
-    timeframe : 'today 5-y' pour 5 ans, 'today 12-m' pour 12 mois, etc.
-    """
-    if not PYTENDS_AVAILABLE:
+
+    if not PYTRENDS_AVAILABLE:
         return None
+
     try:
-        pytrends = TrendReq(hl='en-US', tz=360)
-        pytrends.build_payload(keywords, cat=0, timeframe=timeframe, geo='', gprop='')
+        pytrends = TrendReq(
+            hl='en-US',
+            tz=360,
+            retries=3,
+            backoff_factor=0.5
+        )
+
+        pytrends.build_payload(
+            list(keywords),
+            cat=0,
+            timeframe=timeframe,
+            geo='',
+            gprop=''
+        )
+
         data = pytrends.interest_over_time()
+
         if data.empty:
             return None
+
         if 'isPartial' in data.columns:
             data = data.drop(columns=['isPartial'])
+
         return data
+
     except Exception as e:
-        st.error(f"Erreur lors du chargement des données Google Trends : {e}")
+        st.error(f"Erreur Google Trends : {e}")
         return None
 
 def plot_trends_chart(df, title):
