@@ -505,7 +505,6 @@ elif analysis == "Google Trends":
         st.warning("Veuillez saisir au moins un mot-clé.")
     else:
         with st.spinner("Chargement des données Google Trends..."):
-            pytrends = TrendReq(hl='en-US',tz=360,retries=3,backoff_factor=0.5)
             df_trends = load_trends_data(tuple(trends_keywords), timeframe=trends_timeframe_code)
             if df_trends is not None:
                 # Optionnel : appliquer le filtre années (si pertinent, mais les données Trends sont irrégulières)
