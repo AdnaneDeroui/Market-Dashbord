@@ -7,3 +7,4 @@ scikit-learn>=1.3.0
 quantreo>=0.1.0
 ta>=0.10.2
 fredapi
+pytrends
