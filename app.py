@@ -18,12 +18,6 @@ try:
 except ImportError:
     st.warning("La bibliothèque 'fredapi' n'est pas installée. Le module macro-économique ne fonctionnera pas. Installez-la avec `pip install fredapi`.")
     FRED_AVAILABLE = False
-try:
-    from pytrends.request import TrendReq
-    PYTRENDS_AVAILABLE = True
-except ImportError:
-    st.warning("La bibliothèque 'pytrends' n'est pas installée. Le module Google Trends ne fonctionnera pas. Installez-la avec `pip install pytrends`.")
-    PYTRENDS_AVAILABLE = False
 
 # ============================================================
 # Import des fonctions avancées de volatilité (quantreo)
@@ -308,59 +302,6 @@ def plot_macro_chart(df, title):
     return fig
 
 # ============================================================
-# GOOGLE TRENDS
-# ============================================================
-@st.cache_data(ttl=3600)
-def load_trends_data(keywords: tuple, timeframe='today 5-y'):
-
-    if not PYTRENDS_AVAILABLE:
-        return None
-
-    try:
-        pytrends = TrendReq(
-            hl='en-US',
-            tz=360,
-            retries=3,
-            backoff_factor=0.5
-        )
-
-        pytrends.build_payload(
-            list(keywords),
-            cat=0,
-            timeframe=timeframe,
-            geo='',
-            gprop=''
-        )
-
-        data = pytrends.interest_over_time()
-
-        if data.empty:
-            return None
-
-        if 'isPartial' in data.columns:
-            data = data.drop(columns=['isPartial'])
-
-        return data
-
-    except Exception as e:
-        st.error(f"Erreur Google Trends : {e}")
-        return None
-
-def plot_trends_chart(df, title):
-    """Affiche les courbes d'intérêt Google Trends dans le style Bloomberg."""
-    fig, ax = plt.subplots(figsize=(16, 6), dpi=200)
-    colors = plt.cm.tab10(np.linspace(0, 1, len(df.columns)))
-    for i, col in enumerate(df.columns):
-        ax.plot(df.index, df[col], label=col, color=colors[i], linewidth=2)
-    ax.set_title(title, fontsize=16, weight='bold')
-    ax.set_ylabel("Intérêt de recherche (max = 100)")
-    ax.legend(loc='upper left')
-    ax.grid(True, alpha=0.3)
-    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax.xaxis.get_major_locator()))
-    return fig
-    
-# ============================================================
 # LISTES DE TICKERS PAR CATÉGORIE
 # ============================================================
 # D'après la liste complète fournie
@@ -396,37 +337,20 @@ analysis = st.sidebar.selectbox(
         "Momentum Assets",
         "Momentum Sectors",
         "Momentum International",
-        "US Macro Indicators",
-        "Google Trends"  
-
+        "US Macro Indicators"  
     ]
 )
 
-# Initialisation des variables Google Trends (valeurs par défaut)
-trends_keywords = ["SPY", "inflation"]
-trends_timeframe_code = "today 5-y"
-
-# Si le module Google Trends est sélectionné, afficher les contrôles supplémentaires
-if analysis == "Google Trends":
-    keywords_input = st.sidebar.text_input("Mots-clés (séparés par des virgules)", "SPY, inflation")
-    trends_keywords = [k.strip() for k in keywords_input.split(",") if k.strip()]
-    trends_timeframe = st.sidebar.selectbox(
-        "Période",
-        ["Aujourd'hui 5 ans", "Aujourd'hui 12 mois", "Aujourd'hui 3 mois", "Aujourd'hui 1 mois"],
-        index=0
-    )
-    timeframe_map = {
-        "Aujourd'hui 5 ans": "today 5-y",
-        "Aujourd'hui 12 mois": "today 12-m",
-        "Aujourd'hui 3 mois": "today 3-m",
-        "Aujourd'hui 1 mois": "today 1-m"
-    }
-    trends_timeframe_code = timeframe_map[trends_timeframe]
-
-# Les autres contrôles (ticker, clusters, years) restent inchangés
 ticker = st.sidebar.text_input("Ticker (pour régimes)", "SPY").upper()
+
 clusters = st.sidebar.slider("Nombre de régimes", 2, 6, 4)
-years = st.sidebar.number_input("Années de données", min_value=1, max_value=10, value=1)
+
+years = st.sidebar.number_input(
+    "Années de données",
+    min_value=1,
+    max_value=10,
+    value=1
+)
 
 # ============================================================
 # CORPS PRINCIPAL
@@ -497,26 +421,6 @@ elif analysis == "US Macro Indicators":
                 st.dataframe(df_macro.tail().round(2))
             else:
                 st.error("Impossible de charger les données macro. Vérifiez votre clé API.")
-# --- MODULE GOOGLE TRENDS ---
-elif analysis == "Google Trends":
-    if not PYTRENDS_AVAILABLE:
-        st.error("La bibliothèque 'pytrends' n'est pas installée. Veuillez l'installer pour utiliser ce module.")
-    elif not trends_keywords:
-        st.warning("Veuillez saisir au moins un mot-clé.")
-    else:
-        with st.spinner("Chargement des données Google Trends..."):
-            df_trends = load_trends_data(tuple(trends_keywords), timeframe=trends_timeframe_code)
-            if df_trends is not None:
-                # Optionnel : appliquer le filtre années (si pertinent, mais les données Trends sont irrégulières)
-                # df_trends = filter_years(df_trends, years)  # décommentez si vous voulez limiter dans le temps
-                fig = plot_trends_chart(df_trends, f"Intérêt Google Trends : {', '.join(trends_keywords)}")
-                st.pyplot(fig)
-                
-                # Afficher un tableau des dernières valeurs
-                st.subheader("Dernières valeurs")
-                st.dataframe(df_trends.tail().round(2))
-            else:
-                st.error("Aucune donnée disponible pour ces mots-clés.")
 
 st.markdown("---")
 st.caption("Quant Research Terminal • Streamlit Prototype")
