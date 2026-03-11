@@ -161,12 +161,13 @@ def load_macro_data(api_key):
 def load_trend_data(keyword, year_from, mon_from, year_to, mon_to):
     """
     Télécharge les données Google Trends pour un mot-clé sur une période donnée.
+    Reproduit exactement l'appel de la fonction `trend` du notebook.
     """
     if not PYTENDS_AVAILABLE:
         return None
     try:
-        # Petit délai pour éviter de surcharger l'API
-        time.sleep(2)
+        # Le notebook utilise un time.sleep(10) avant l'appel, nous le conservons
+        time.sleep(10)
         df = dailydata.get_daily_data(
             keyword,
             start_year=year_from,
@@ -345,11 +346,18 @@ def plot_macro_chart(df, title):
     plt.tight_layout()
     return fig
 
-def plot_trend_chart(df, keyword, window, num):
+def plot_trend_chart(keyword, year_from, mon_from, year_to, mon_to, window, num, figsize=(16, 6), dpi=200):
     """
-    Affiche la tendance Google Trends d'un mot-clé avec le style Bloomberg.
+    Reproduit exactement la fonction `trend` du notebook Trends.ipynb.
+    Retourne la figure matplotlib.
     """
-    fig, ax = plt.subplots(figsize=(16, 6), dpi=200)
+    # Téléchargement des données (avec cache)
+    df = load_trend_data(keyword, year_from, mon_from, year_to, mon_to)
+    if df is None or df.empty:
+        return None
+
+    # Création de la figure
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
 
     # Série principale
     ax.plot(df.index, df[keyword], color="#F0F0F0", linewidth=1.5, alpha=0.9, label=keyword)
@@ -500,7 +508,7 @@ elif analysis == "US Macro Indicators":
             else:
                 st.error("Impossible de charger les données macro. Vérifiez votre clé API.")
 
-# --- NOUVEAU : Google Trends ---
+# --- NOUVEAU : Google Trends (exactement comme dans le notebook) ---
 elif analysis == "Google Trends":
     if not PYTENDS_AVAILABLE:
         st.error("La bibliothèque 'pytrends' n'est pas installée. Veuillez l'installer avec `pip install pytrends`.")
@@ -522,15 +530,15 @@ elif analysis == "Google Trends":
 
         if st.sidebar.button("Lancer l'analyse"):
             with st.spinner("Téléchargement des données Google Trends..."):
-                df_trend = load_trend_data(keyword, year_from, mon_from, year_to, mon_to)
-                if df_trend is not None and not df_trend.empty:
-                    # On peut éventuellement filtrer les années, mais les données sont déjà sur la période choisie
-                    fig = plot_trend_chart(df_trend, keyword, window, num_std)
+                # Appel direct à la fonction de tracé qui utilise le cache
+                fig = plot_trend_chart(keyword, year_from, mon_from, year_to, mon_to, window, num_std)
+                if fig is not None:
                     st.pyplot(fig)
-
-                    # Afficher un aperçu des données
-                    st.subheader("Aperçu des données")
-                    st.dataframe(df_trend[[keyword, 'isPartial']].tail(10))
+                    # Afficher un aperçu des données (optionnel)
+                    df_preview = load_trend_data(keyword, year_from, mon_from, year_to, mon_to)
+                    if df_preview is not None:
+                        st.subheader("Aperçu des données")
+                        st.dataframe(df_preview[[keyword, 'isPartial']].tail(10))
                 else:
                     st.error("Impossible de charger les données. Vérifiez votre mot-clé ou la période.")
 
