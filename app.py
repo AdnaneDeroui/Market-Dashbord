@@ -1,3 +1,4 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -47,6 +48,19 @@ except ImportError:
             def yang_zhang_volatility(df, high_col, low_col, open_col, close_col, window_size):
                 # Version simplifiée, non exacte
                 return df['close'].pct_change().rolling(window_size).std()
+
+# ============================================================
+# Import pytrends pour le module Google Trends
+# ============================================================
+try:
+    from pytrends import dailydata
+    from pytrends.request import TrendReq
+    import datetime
+    import time
+    PYTENDS_AVAILABLE = True
+except ImportError:
+    st.warning("La bibliothèque 'pytrends' n'est pas installée. Le module Google Trends ne fonctionnera pas. Installez-la avec `pip install pytrends`.")
+    PYTENDS_AVAILABLE = False
 
 # ============================================================
 # CONFIGURATION DE LA PAGE
@@ -138,6 +152,35 @@ def load_macro_data(api_key):
 
     except Exception as e:
         st.error(f"Erreur lors du chargement des données macro: {e}")
+        return None
+
+# ============================================================
+# CHARGEMENT DES DONNÉES GOOGLE TRENDS (avec cache)
+# ============================================================
+@st.cache_data(ttl=21600)  # 6 heures de cache
+def load_trend_data(keyword, year_from, mon_from, year_to, mon_to):
+    """
+    Télécharge les données Google Trends pour un mot-clé sur une période donnée.
+    """
+    if not PYTENDS_AVAILABLE:
+        return None
+    try:
+        # Petit délai pour éviter de surcharger l'API
+        time.sleep(2)
+        df = dailydata.get_daily_data(
+            keyword,
+            start_year=year_from,
+            start_mon=mon_from,
+            stop_year=year_to,
+            stop_mon=mon_to
+        )
+        # La colonne porte le nom du mot-clé
+        if keyword not in df.columns:
+            st.error("La colonne des données n'a pas été trouvée.")
+            return None
+        return df
+    except Exception as e:
+        st.error(f"Erreur lors du téléchargement des données Google Trends : {e}")
         return None
 
 # ============================================================
@@ -302,6 +345,42 @@ def plot_macro_chart(df, title):
     plt.tight_layout()
     return fig
 
+def plot_trend_chart(df, keyword, window, num):
+    """
+    Affiche la tendance Google Trends d'un mot-clé avec le style Bloomberg.
+    """
+    fig, ax = plt.subplots(figsize=(16, 6), dpi=200)
+
+    # Série principale
+    ax.plot(df.index, df[keyword], color="#F0F0F0", linewidth=1.5, alpha=0.9, label=keyword)
+
+    # Calculs des bandes
+    rolling_mean = df[keyword].rolling(window).mean()
+    rolling_std = df[keyword].rolling(window).std()
+
+    # Bande inférieure (verte)
+    ax.plot(rolling_mean - num * rolling_std, color="#00FF00", linewidth=1.2, linestyle="--", label=f"Mean - {num}σ")
+    # Bande supérieure (rouge)
+    ax.plot(rolling_mean + num * rolling_std, color="#FF0000", linewidth=1.2, linestyle="--", label=f"Mean + {num}σ")
+    # Remplissage entre les bandes
+    ax.fill_between(df.index, rolling_mean - num * rolling_std, rolling_mean + num * rolling_std,
+                    color="#2A2F36", alpha=0.3)
+
+    # Titre et labels
+    ax.set_title(f"Google Trends – {keyword.upper()}", fontsize=16, weight="bold")
+    ax.set_ylabel("Intérêt de recherche")
+    ax.legend(loc="upper left")
+
+    # Grille
+    ax.grid(True, alpha=0.3)
+
+    # Formatage des dates
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax.xaxis.get_major_locator()))
+
+    plt.tight_layout()
+    return fig
+
 # ============================================================
 # LISTES DE TICKERS PAR CATÉGORIE
 # ============================================================
@@ -317,7 +396,7 @@ TICKERS_DEFAULT = [
 # Groupes
 ASSETS = ["SPY", "QQQ", "EFA", "EEM", "TLT", "GLD", "USO", "SLV", "VNQ"]
 SECTORS = ["XLY", "XLP", "XLE", "XLF", "XLV", "XLI", "XLB", "XLRE", "XLK", "XLC", "XLU", "XBI", "GDX"]
-INTERNATIONAL = [t for t in TICKERS_DEFAULT if t not in ASSETS + SECTORS and t not in ["VOO"]]  # VOO est US, on le laisse dans INTERNATIONAL pour l'exemple
+INTERNATIONAL = [t for t in TICKERS_DEFAULT if t not in ASSETS + SECTORS and t not in ["VOO"]]
 # On ajoute VOO à ASSETS pour être cohérent
 ASSETS.append("VOO")
 
@@ -338,7 +417,8 @@ analysis = st.sidebar.selectbox(
         "Momentum Assets",
         "Momentum Sectors",
         "Momentum International",
-        "US Macro Indicators"  
+        "US Macro Indicators",
+        "Google Trends"                     # Nouveau module
     ]
 )
 
@@ -404,8 +484,7 @@ elif analysis == "Momentum International":
         df = filter_years(df, years)
         fig = plot_momentum_chart(df, "Momentum International")
         st.pyplot(fig)
-        
-# --- NOUVEAU : Macro Indicators ---
+
 elif analysis == "US Macro Indicators":
     if not api_key:
         st.warning("Veuillez entrer votre clé API FRED dans la barre latérale pour accéder aux données macro.")
@@ -413,15 +492,47 @@ elif analysis == "US Macro Indicators":
         with st.spinner("Chargement des indicateurs macroéconomiques..."):
             df_macro = load_macro_data(api_key)
             if df_macro is not None:
-                df_macro = filter_years(df_macro, years)  # Réutilise votre fonction existante
+                df_macro = filter_years(df_macro, years)
                 fig = plot_macro_chart(df_macro, "Indicateurs Macroéconomiques US")
                 st.pyplot(fig)
-                
-                # Afficher un tableau des dernières valeurs
                 st.subheader("Dernières valeurs")
                 st.dataframe(df_macro.tail().round(2))
             else:
                 st.error("Impossible de charger les données macro. Vérifiez votre clé API.")
+
+# --- NOUVEAU : Google Trends ---
+elif analysis == "Google Trends":
+    if not PYTENDS_AVAILABLE:
+        st.error("La bibliothèque 'pytrends' n'est pas installée. Veuillez l'installer avec `pip install pytrends`.")
+    else:
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("Paramètres Google Trends")
+        keyword = st.sidebar.text_input("Mot-clé", "stock market crash").lower().replace(" ", "_")
+        # Période (année/mois début et fin)
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            year_from = st.number_input("Année début", min_value=2004, max_value=datetime.datetime.now().year, value=datetime.datetime.now().year-1)
+            mon_from = st.number_input("Mois début", min_value=1, max_value=12, value=datetime.datetime.now().month)
+        with col2:
+            year_to = st.number_input("Année fin", min_value=2004, max_value=datetime.datetime.now().year, value=datetime.datetime.now().year)
+            mon_to = st.number_input("Mois fin", min_value=1, max_value=12, value=datetime.datetime.now().month)
+
+        window = st.sidebar.slider("Fenêtre moyenne mobile (jours)", 5, 200, 50)
+        num_std = st.sidebar.number_input("Nombre d'écarts-types", min_value=0.5, max_value=5.0, value=1.0, step=0.5)
+
+        if st.sidebar.button("Lancer l'analyse"):
+            with st.spinner("Téléchargement des données Google Trends..."):
+                df_trend = load_trend_data(keyword, year_from, mon_from, year_to, mon_to)
+                if df_trend is not None and not df_trend.empty:
+                    # On peut éventuellement filtrer les années, mais les données sont déjà sur la période choisie
+                    fig = plot_trend_chart(df_trend, keyword, window, num_std)
+                    st.pyplot(fig)
+
+                    # Afficher un aperçu des données
+                    st.subheader("Aperçu des données")
+                    st.dataframe(df_trend[[keyword, 'isPartial']].tail(10))
+                else:
+                    st.error("Impossible de charger les données. Vérifiez votre mot-clé ou la période.")
 
 st.markdown("---")
 st.caption("Quant Research Terminal • Streamlit Prototype")
