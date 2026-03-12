@@ -11,6 +11,8 @@ from sklearn.cluster import KMeans
 from sklearn.mixture import BayesianGaussianMixture
 import ta
 import warnings
+from pytrends.request import TrendReq
+import datetime
 warnings.filterwarnings("ignore")
 
 try:
@@ -303,6 +305,71 @@ def plot_macro_chart(df, title):
     return fig
 
 # ============================================================
+# AJOUT POUR GOOGLE TRENDS
+# ============================================================
+from pytrends.request import TrendReq
+import datetime
+
+@st.cache_data(ttl=3600)
+def plot_google_trends(keyword, window=20, num=1):
+    """
+    Récupère les données Google Trends pour un mot-clé et
+    génère un graphique avec bandes de volatilité.
+    """
+    try:
+        pytrend = TrendReq()
+        pytrend.build_payload(kw_list=[keyword])
+        df = pytrend.interest_over_time()
+        if df.empty:
+            st.warning("Aucune donnée trouvée pour ce mot‑clé.")
+            return None
+
+        # Style Bloomberg (identique à celui du notebook)
+        plt.style.use("dark_background")
+        rcParams.update({
+            "figure.facecolor": "#0E1117",
+            "axes.facecolor": "#0E1117",
+            "axes.edgecolor": "#3A3F44",
+            "axes.labelcolor": "white",
+            "xtick.color": "white",
+            "ytick.color": "white",
+            "grid.color": "#2A2F36",
+            "grid.alpha": 0.3,
+            "font.size": 11
+        })
+
+        fig, ax = plt.subplots(figsize=(16, 6), dpi=400)
+        ax.plot(df.index, df[keyword], color="#F0F0F0", linewidth=1.5,
+                alpha=0.9, label=keyword)
+
+        rolling_mean = df[keyword].rolling(window).mean()
+        rolling_std = df[keyword].rolling(window).std()
+
+        ax.plot(rolling_mean - num * rolling_std, color="#00FF00",
+                linewidth=1.2, linestyle="--", label=f"Mean - {num}σ")
+        ax.plot(rolling_mean + num * rolling_std, color="#FF0000",
+                linewidth=1.2, linestyle="--", label=f"Mean + {num}σ")
+        ax.fill_between(df.index,
+                        rolling_mean - num * rolling_std,
+                        rolling_mean + num * rolling_std,
+                        color="#2A2F36", alpha=0.3)
+
+        ax.set_title(f"Google Trends – {keyword.upper()}", fontsize=16, weight="bold")
+        ax.set_ylabel("Intérêt de recherche")
+        ax.legend(loc="upper left")
+        ax.grid(True, alpha=0.3)
+
+        ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+        ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax.xaxis.get_major_locator()))
+
+        plt.tight_layout()
+        return fig
+
+    except Exception as e:
+        st.error(f"Erreur lors de la requête Google Trends : {e}")
+        return None
+
+# ============================================================
 # LISTES DE TICKERS PAR CATÉGORIE
 # ============================================================
 # D'après la liste complète fournie
@@ -338,7 +405,8 @@ analysis = st.sidebar.selectbox(
         "Momentum Assets",
         "Momentum Sectors",
         "Momentum International",
-        "US Macro Indicators"  
+        "US Macro Indicators",
+        "Google Trends"
     ]
 )
 
@@ -422,6 +490,14 @@ elif analysis == "US Macro Indicators":
                 st.dataframe(df_macro.tail().round(2))
             else:
                 st.error("Impossible de charger les données macro. Vérifiez votre clé API.")
+                
+elif analysis == "Google Trends":
+    keyword = st.sidebar.text_input("Mot‑clé", "monte rosa therapeutics")
+    if st.sidebar.button("Lancer"):
+        with st.spinner("Récupération des données Google Trends..."):
+            fig = plot_google_trends(keyword)
+            if fig:
+                st.pyplot(fig)
 
 st.markdown("---")
 st.caption("Quant Research Terminal • Streamlit Prototype")
