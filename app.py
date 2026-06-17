@@ -240,7 +240,7 @@ def plot_regime_with_pca(df, regime_col, pca_col, title):
     fig1, ax1 = plt.subplots(figsize=(16, 6), dpi=200)
     ax1.plot(df.index, df['avg'], color='#F0F0F0', linewidth=1.5, alpha=0.9, label='Avg Price')
     clusters = df[regime_col].unique()
-    cmap = plt.cm.get_cmap('tab10', len(clusters))
+    cmap = matplotlib.colormaps['tab10']
     for c in clusters:
         temp = df[df[regime_col] == c]
         ax1.scatter(temp.index, temp['avg'], s=15, color=cmap(c), label=f'Regime {c}')
